@@ -7,6 +7,7 @@ export interface Env {
     REFRESH_TOKEN?: string;
     KV?: KVNamespace;
     ASSETS?: Fetcher;
+    DEBUG_LOG_PAYLOADS?: string;
 }
 
 interface AccountConfig {
@@ -354,6 +355,11 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
     const upstreamModel = modelInfo.upstreamModel;
     const isStream = !!body.stream;
 
+    const shouldLog = env.DEBUG_LOG_PAYLOADS !== "false";
+    if (shouldLog) {
+        console.log(`[REQUEST JSON] Model: ${requestedModel} | Stream: ${isStream}\n` + JSON.stringify(body, null, 2));
+    }
+
     const maxAttempts = Math.min(accountsPool.length, 3);
     let lastError: { status: number; message: string; type: string } = {
         status: 503,
@@ -412,10 +418,14 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
                     account.totalRequests = (account.totalRequests || 0) + 1;
                     account.lastUsed = Date.now();
                     if (isStream) {
-                        return streamToOpenAi(response, requestedModel);
+                        return streamToOpenAi(response, requestedModel, shouldLog);
                     } else {
                         const data = await response.json() as any;
-                        return jsonResponse(mapUnaryResponse(data, requestedModel));
+                        const mapped = mapUnaryResponse(data, requestedModel);
+                        if (shouldLog) {
+                            console.log(`[RESPONSE JSON] Model: ${requestedModel}\n` + JSON.stringify(mapped, null, 2));
+                        }
+                        return jsonResponse(mapped);
                     }
                 }
 
@@ -594,7 +604,7 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
 }
 
 // ========== STREAMING (SSE) ==========
-function streamToOpenAi(response: Response, modelName: string): Response {
+function streamToOpenAi(response: Response, modelName: string, shouldLog = true): Response {
     const completionId = `chatcmpl-${crypto.randomUUID()}`;
     const created = Math.floor(Date.now() / 1000);
 
@@ -602,6 +612,8 @@ function streamToOpenAi(response: Response, modelName: string): Response {
     let isFirstChunk = true;
     let hasSentThinkOpen = false;
     let hasSentThinkClose = false;
+    let accumulatedThought = "";
+    let accumulatedContent = "";
 
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -622,6 +634,20 @@ function streamToOpenAi(response: Response, modelName: string): Response {
             }
             if (hasSentThinkOpen && !hasSentThinkClose) {
                 sendChunk(controller, "\n</think>\n", null);
+            }
+            if (shouldLog) {
+                console.log(`[RESPONSE STREAM COMPLETE] Model: ${modelName}\n` + JSON.stringify({
+                    id: completionId,
+                    object: "chat.completion",
+                    model: modelName,
+                    choices: [{
+                        index: 0,
+                        message: {
+                            role: "assistant",
+                            content: (accumulatedThought ? `<think>\n${accumulatedThought}\n</think>\n` : "") + accumulatedContent
+                        }
+                    }]
+                }, null, 2));
             }
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         }
@@ -655,6 +681,7 @@ function streamToOpenAi(response: Response, modelName: string): Response {
             }
 
             if (thinkText) {
+                accumulatedThought += thinkText;
                 if (!hasSentThinkOpen) {
                     sendChunk(controller, "<think>\n", null);
                     hasSentThinkOpen = true;
@@ -667,6 +694,7 @@ function streamToOpenAi(response: Response, modelName: string): Response {
                     cand.finishReason === "SAFETY" ? "content_filter" : null;
 
             if (contentText) {
+                accumulatedContent += contentText;
                 if (hasSentThinkOpen && !hasSentThinkClose) {
                     sendChunk(controller, "\n</think>\n", null);
                     hasSentThinkClose = true;
