@@ -1,0 +1,7 @@
+[
+  {
+    "email": "user@example.com",
+    "refresh_token": "1//04example_refresh_token_string",
+    "project_id": "aicode-consumers"
+  }
+]

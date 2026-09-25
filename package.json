@@ -1,0 +1,15 @@
+{
+  "name": "antigravity-gemini-proxy",
+  "version": "1.0.0",
+  "description": "High-performance OpenAI-compatible proxy for Google Cloud Code / Gemini",
+  "type": "module",
+  "scripts": {
+    "login": "node --experimental-strip-types login.ts",
+    "test": "node --experimental-strip-types test-proxy.ts",
+    "dev": "wrangler dev",
+    "deploy": "node --experimental-strip-types deploy.ts"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.0"
+  }
+}

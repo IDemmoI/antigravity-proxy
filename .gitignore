@@ -1,0 +1,18 @@
+# Credentials & Secrets
+accounts.json
+.env
+.dev.vars
+*.pem
+
+# Dependencies & Build
+node_modules/
+dist/
+.wrangler/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# System files
+.DS_Store
+Thumbs.db

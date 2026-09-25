@@ -1,0 +1,18 @@
+name = "antigravity-proxy"
+main = "worker.ts"
+compatibility_date = "2024-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# KV namespace for caching tokens and discovered projects (recommended)
+# Create via: npx wrangler kv namespace create "KV"
+# Then uncomment and fill id:
+# [[kv_namespaces]]
+# binding = "KV"
+# id = "your-kv-namespace-id"
+
+# Secrets to set via wrangler secret:
+# npx wrangler secret put PROXY_API_KEY       <- Your master secret key for API requests
+# npx wrangler secret put ACCOUNTS            <- Paste content of accounts.json
