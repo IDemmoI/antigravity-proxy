@@ -80,6 +80,17 @@
         guideCurlSnippet: document.getElementById("guide-curl-snippet"),
         drawerOverlay: document.getElementById("drawer-overlay"),
         
+        btnCopyActiveModel: document.getElementById("btn-copy-active-model"),
+        guideTabs: document.querySelectorAll(".guide-tab-btn"),
+        panePresets: document.getElementById("pane-presets"),
+        paneModels: document.getElementById("pane-models"),
+        btnSwitchToModelsTab: document.getElementById("btn-switch-to-models-tab"),
+        modelDirSearch: document.getElementById("model-dir-search"),
+        btnClearModelSearch: document.getElementById("btn-clear-model-search"),
+        modelDirFilters: document.getElementById("model-dir-filters"),
+        modelDirList: document.getElementById("model-dir-list"),
+        guideModelsCount: document.getElementById("guide-models-count"),
+
         btnOpenKeyModal: document.getElementById("btn-open-key-modal"),
         modalKeyBackdrop: document.getElementById("modal-key-backdrop"),
         inputMasterKey: document.getElementById("input-master-key"),
@@ -114,6 +125,8 @@
         }
 
         // Check proxy connectivity and models
+        renderModelOptions();
+        renderModelDirectory();
         await checkHealth();
         if (state.apiKey) {
             await Promise.all([loadModels(), loadAccountsStatus()]);
@@ -163,7 +176,21 @@
             if (isImg && state.mode !== "image") {
                 setMode("image");
             }
+            renderModelDirectory();
         });
+
+        // Copy active model ID button in controls bar
+        if (dom.btnCopyActiveModel) {
+            dom.btnCopyActiveModel.addEventListener("click", () => {
+                const current = dom.selectModel.value || state.selectedModel;
+                if (!current) return;
+                navigator.clipboard.writeText(current);
+                dom.btnCopyActiveModel.classList.add("copied");
+                setTimeout(() => {
+                    dom.btnCopyActiveModel.classList.remove("copied");
+                }, 1800);
+            });
+        }
 
         // Thinking level segmented control
         dom.thinkingSegmented.addEventListener("click", (e) => {
@@ -236,6 +263,52 @@
         dom.btnCloseGuide.addEventListener("click", closeDrawers);
         dom.drawerOverlay.addEventListener("click", closeDrawers);
         dom.btnResetCooldowns.addEventListener("click", resetCooldowns);
+
+        // Guide Tabs & Model Directory Controls
+        if (dom.guideTabs) {
+            dom.guideTabs.forEach(tab => {
+                tab.addEventListener("click", () => {
+                    switchGuideTab(tab.dataset.tab);
+                });
+            });
+        }
+
+        if (dom.btnSwitchToModelsTab) {
+            dom.btnSwitchToModelsTab.addEventListener("click", () => {
+                switchGuideTab("pane-models");
+            });
+        }
+
+        if (dom.modelDirSearch) {
+            dom.modelDirSearch.addEventListener("input", (e) => {
+                const val = e.target.value;
+                if (dom.btnClearModelSearch) {
+                    dom.btnClearModelSearch.style.display = val ? "block" : "none";
+                }
+                renderModelDirectory();
+            });
+        }
+
+        if (dom.btnClearModelSearch) {
+            dom.btnClearModelSearch.addEventListener("click", () => {
+                if (dom.modelDirSearch) {
+                    dom.modelDirSearch.value = "";
+                    dom.btnClearModelSearch.style.display = "none";
+                    renderModelDirectory();
+                    dom.modelDirSearch.focus();
+                }
+            });
+        }
+
+        if (dom.modelDirFilters) {
+            dom.modelDirFilters.addEventListener("click", (e) => {
+                const chip = e.target.closest(".filter-chip");
+                if (!chip) return;
+                dom.modelDirFilters.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("active"));
+                chip.classList.add("active");
+                renderModelDirectory();
+            });
+        }
 
         // Copy buttons
         document.querySelectorAll(".btn-copy").forEach(btn => {
@@ -387,17 +460,217 @@
         }
     }
 
+    // --- Model Catalog & Presets ---
+    const CATALOG_MODELS = [
+        {
+            id: "claude-sonnet-5-5-high",
+            name: "Claude Sonnet 5.5 (High Reasoning)",
+            vendor: "Anthropic",
+            vendorClass: "anthropic",
+            category: "claude",
+            badge: "Flagship Reasoning",
+            badgeClass: "tag-pill-accent",
+            context: "200K ctx",
+            output: "64K out",
+            thinking: "High Thinking",
+            aliases: ["claude-sonnet-5-5", "claude-3-7-sonnet", "sonnet-5.5", "claude"],
+            description: "Top-tier coding, complex architecture & analytical reasoning with maximum thought budget."
+        },
+        {
+            id: "claude-sonnet-5-5-medium",
+            name: "Claude Sonnet 5.5 (Medium Reasoning)",
+            vendor: "Anthropic",
+            vendorClass: "anthropic",
+            category: "claude",
+            badge: "Balanced Coding",
+            badgeClass: "tag-pill-accent",
+            context: "200K ctx",
+            output: "64K out",
+            thinking: "Medium Thinking",
+            aliases: ["claude-sonnet-5-5-medium", "claude-medium"],
+            description: "Fast turnaround with thorough chain-of-thought for everyday programming and refactoring."
+        },
+        {
+            id: "claude-sonnet-5-5-low",
+            name: "Claude Sonnet 5.5 (Low Reasoning)",
+            vendor: "Anthropic",
+            vendorClass: "anthropic",
+            category: "claude",
+            badge: "High Speed",
+            badgeClass: "tag-pill-accent",
+            context: "200K ctx",
+            output: "64K out",
+            thinking: "Low Thinking",
+            aliases: ["claude-sonnet-5-5-low"],
+            description: "Near instant responses with brief chain-of-thought for interactive edits and chats."
+        },
+        {
+            id: "claude-opus-5-5-high",
+            name: "Claude Opus 5.5 (High Reasoning)",
+            vendor: "Anthropic",
+            vendorClass: "anthropic",
+            category: "claude",
+            badge: "Extreme Intelligence",
+            badgeClass: "tag-pill-accent",
+            context: "200K ctx",
+            output: "64K out",
+            thinking: "High Thinking",
+            aliases: ["claude-opus-5-5", "opus-5.5", "opus"],
+            description: "Deep multi-step logic, formal reasoning, and research-grade synthesis."
+        },
+        {
+            id: "claude-opus-5-5-medium",
+            name: "Claude Opus 5.5 (Medium Reasoning)",
+            vendor: "Anthropic",
+            vendorClass: "anthropic",
+            category: "claude",
+            badge: "Deep Analysis",
+            badgeClass: "tag-pill-accent",
+            context: "200K ctx",
+            output: "64K out",
+            thinking: "Medium Thinking",
+            aliases: ["claude-opus-5-5-medium"],
+            description: "Comprehensive reasoning and nuanced writing with reduced thinking latency."
+        },
+        {
+            id: "gemini-3.8-flash-tiered",
+            name: "Gemini 3.8 Flash (Tiered)",
+            vendor: "Google",
+            vendorClass: "google",
+            category: "gemini3",
+            badge: "Next-Gen Fast",
+            badgeClass: "tag-pill-emerald",
+            context: "1M ctx",
+            output: "64K out",
+            thinking: "Tiered Adaptive",
+            aliases: ["gemini-3.8-flash", "gemini-3.8"],
+            description: "Google's latest lightweight multimodal model with dynamic CoT scaling and ultra-fast generation."
+        },
+        {
+            id: "gemini-3.7-flash-tiered",
+            name: "Gemini 3.7 Flash (Tiered)",
+            vendor: "Google",
+            vendorClass: "google",
+            category: "gemini3",
+            badge: "Agentic Speed",
+            badgeClass: "tag-pill-emerald",
+            context: "1M ctx",
+            output: "64K out",
+            thinking: "Tiered Adaptive",
+            aliases: ["gemini-3.7-flash", "gemini-3.7"],
+            description: "Hybrid reasoning model designed for tool use, coding agents, and complex instruction following."
+        },
+        {
+            id: "gemini-2.5-pro",
+            name: "Gemini 2.5 Pro",
+            vendor: "Google",
+            vendorClass: "google",
+            category: "gemini2",
+            badge: "2M Context",
+            badgeClass: "tag-pill-emerald",
+            context: "2M ctx",
+            output: "64K out",
+            thinking: "High CoT",
+            aliases: ["gemini-pro"],
+            description: "Huge 2,000,000 token context window for digesting entire codebases, books, and hour-long videos."
+        },
+        {
+            id: "gemini-2.5-flash",
+            name: "Gemini 2.5 Flash",
+            vendor: "Google",
+            vendorClass: "google",
+            category: "gemini2",
+            badge: "Default Workhorse",
+            badgeClass: "tag-pill-emerald",
+            context: "1M ctx",
+            output: "64K out",
+            thinking: "Adaptive CoT",
+            aliases: ["gemini-flash", "flash"],
+            description: "Ultra low latency, rock solid reliability, and high throughput for general chat and streaming."
+        },
+        {
+            id: "gemini-3.1-flash-image",
+            name: "Gemini 3.1 Flash Image",
+            vendor: "Google",
+            vendorClass: "google",
+            category: "vision",
+            badge: "Image Generation",
+            badgeClass: "tag-pill-accent",
+            context: "128K ctx",
+            output: "Image Output",
+            thinking: "Direct Gen",
+            aliases: ["dall-e-3", "imagen-3", "gemini-image"],
+            description: "High fidelity image generation and detailed visual understanding directly via OpenAI API."
+        },
+        {
+            id: "gpt-oss-120b-medium",
+            name: "GPT OSS 120B (Medium)",
+            vendor: "Open Source",
+            vendorClass: "meta",
+            category: "opensource",
+            badge: "Open Weights",
+            badgeClass: "tag-pill-accent",
+            context: "128K ctx",
+            output: "32K out",
+            thinking: "Medium Thinking",
+            aliases: ["gpt-oss-120b", "oss-120b"],
+            description: "Massive open-source reasoning model hosted on Google Cloud infrastructure."
+        }
+    ];
+
+    function getAllDirectoryModels() {
+        const catalogMap = new Map();
+        CATALOG_MODELS.forEach(m => catalogMap.set(m.id, { ...m }));
+
+        if (Array.isArray(state.models)) {
+            state.models.forEach(m => {
+                const id = m.id;
+                if (!catalogMap.has(id)) {
+                    const isClaude = id.includes("claude");
+                    const isGemini3 = id.includes("3.");
+                    const isVision = id.includes("image") || id.includes("vision");
+                    let category = "gemini2";
+                    if (isClaude) category = "claude";
+                    else if (isVision) category = "vision";
+                    else if (isGemini3) category = "gemini3";
+
+                    catalogMap.set(id, {
+                        id: id,
+                        name: id,
+                        vendor: isClaude ? "Anthropic" : "Google",
+                        vendorClass: isClaude ? "anthropic" : "google",
+                        category: category,
+                        badge: "Discovered",
+                        badgeClass: "tag-pill-accent",
+                        context: "Upstream",
+                        output: "Standard",
+                        thinking: "Supported",
+                        aliases: [],
+                        description: "Auto-discovered upstream model ID from Google API."
+                    });
+                }
+            });
+        }
+        return Array.from(catalogMap.values());
+    }
+
     function renderModelOptions() {
+        if (!dom.selectModel) return;
+        const currentSelected = dom.selectModel.value || state.selectedModel;
         dom.selectModel.innerHTML = "";
+
         const preferred = [
             "gemini-2.5-flash",
             "gemini-3.8-flash-tiered",
+            "claude-sonnet-5-5-high",
+            "claude-sonnet-5-5-medium",
+            "claude-sonnet-5-5-low",
+            "claude-opus-5-5-high",
+            "claude-opus-5-5-medium",
             "gemini-3.7-flash-tiered",
             "gemini-2.5-pro",
-            "claude-sonnet-4-6",
-            "claude-opus-4-6-thinking",
             "gemini-3.1-flash-image",
-            "dall-e-3"
+            "gpt-oss-120b-medium"
         ];
 
         // Group into Featured and All
@@ -407,38 +680,149 @@
         const allGroup = document.createElement("optgroup");
         allGroup.label = "All Discovered Models";
 
-        const modelIds = state.models.map(m => m.id);
+        const modelIds = Array.isArray(state.models) ? state.models.map(m => m.id) : [];
         const added = new Set();
 
         for (const pref of preferred) {
-            if (modelIds.includes(pref)) {
-                const opt = document.createElement("option");
-                opt.value = pref;
-                opt.textContent = pref;
-                featuredGroup.appendChild(opt);
-                added.add(pref);
-            }
+            const opt = document.createElement("option");
+            opt.value = pref;
+            opt.textContent = pref;
+            featuredGroup.appendChild(opt);
+            added.add(pref);
         }
 
-        for (const model of state.models) {
-            if (!added.has(model.id)) {
-                const opt = document.createElement("option");
-                opt.value = model.id;
-                opt.textContent = model.id;
-                allGroup.appendChild(opt);
+        if (Array.isArray(state.models)) {
+            for (const model of state.models) {
+                if (!added.has(model.id)) {
+                    const opt = document.createElement("option");
+                    opt.value = model.id;
+                    opt.textContent = model.id;
+                    allGroup.appendChild(opt);
+                    added.add(model.id);
+                }
             }
         }
 
         if (featuredGroup.children.length > 0) dom.selectModel.appendChild(featuredGroup);
         if (allGroup.children.length > 0) dom.selectModel.appendChild(allGroup);
 
-        // Select default
-        if (modelIds.includes("gemini-2.5-flash")) {
+        // Restore or set selection
+        if (currentSelected && added.has(currentSelected)) {
+            dom.selectModel.value = currentSelected;
+        } else if (modelIds.includes("gemini-2.5-flash")) {
             dom.selectModel.value = "gemini-2.5-flash";
-        } else if (modelIds.length > 0) {
-            dom.selectModel.value = modelIds[0];
+        } else if (dom.selectModel.options.length > 0) {
+            dom.selectModel.value = dom.selectModel.options[0].value;
         }
         state.selectedModel = dom.selectModel.value;
+
+        // Also update directory count and directory
+        const allList = getAllDirectoryModels();
+        if (dom.guideModelsCount) {
+            dom.guideModelsCount.textContent = allList.length;
+        }
+        renderModelDirectory();
+    }
+
+    function renderModelDirectory() {
+        if (!dom.modelDirList) return;
+
+        const activeChip = dom.modelDirFilters ? dom.modelDirFilters.querySelector(".filter-chip.active") : null;
+        const category = activeChip ? activeChip.dataset.cat : "all";
+        const query = dom.modelDirSearch ? dom.modelDirSearch.value.trim().toLowerCase() : "";
+
+        const allList = getAllDirectoryModels();
+        if (dom.guideModelsCount) {
+            dom.guideModelsCount.textContent = allList.length;
+        }
+
+        const filtered = allList.filter(m => {
+            if (category !== "all" && m.category !== category) {
+                return false;
+            }
+            if (query) {
+                const matchId = m.id.toLowerCase().includes(query);
+                const matchName = m.name.toLowerCase().includes(query);
+                const matchDesc = m.description && m.description.toLowerCase().includes(query);
+                const matchAlias = m.aliases && m.aliases.some(a => a.toLowerCase().includes(query));
+                if (!matchId && !matchName && !matchDesc && !matchAlias) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        dom.modelDirList.innerHTML = "";
+
+        if (filtered.length === 0) {
+            dom.modelDirList.innerHTML = `
+                <div class="model-dir-empty">
+                    <p>No models found matching "<strong>${escapeHtml(query)}</strong>"</p>
+                </div>
+            `;
+            return;
+        }
+
+        filtered.forEach(m => {
+            const card = document.createElement("div");
+            card.className = "model-dir-card";
+            if (m.id === state.selectedModel) {
+                card.classList.add("highlight");
+            }
+
+            card.innerHTML = `
+                <div class="model-dir-top">
+                    <div class="model-dir-title">
+                        <span>${escapeHtml(m.name)}</span>
+                        <span class="vendor-badge ${m.vendorClass}">${escapeHtml(m.vendor)}</span>
+                    </div>
+                    ${m.badge ? `<span class="tag-pill ${m.badgeClass || 'tag-pill-accent'}">${escapeHtml(m.badge)}</span>` : ""}
+                </div>
+                <div class="model-dir-desc">${escapeHtml(m.description)}</div>
+                <div class="model-id-box">
+                    <span class="model-id-code">${escapeHtml(m.id)}</span>
+                    <button class="btn-copy-model-id" data-copy="${escapeHtml(m.id)}" title="Copy Model ID">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span>Copy ID</span>
+                    </button>
+                </div>
+                <div class="model-meta-row">
+                    <span class="model-meta-item"><strong>Ctx:</strong> ${escapeHtml(m.context)}</span>
+                    <span class="model-meta-item"><strong>Max Out:</strong> ${escapeHtml(m.output)}</span>
+                    <span class="model-meta-item"><strong>Thinking:</strong> ${escapeHtml(m.thinking)}</span>
+                </div>
+                ${m.aliases && m.aliases.length > 0 ? `
+                <div class="model-aliases-row">
+                    <span>Aliases:</span>
+                    ${m.aliases.map(a => `<button class="alias-chip" data-copy="${escapeHtml(a)}" title="Click to copy alias">${escapeHtml(a)}</button>`).join("")}
+                </div>
+                ` : ""}
+            `;
+
+            dom.modelDirList.appendChild(card);
+        });
+
+        // Attach copy handlers
+        dom.modelDirList.querySelectorAll("[data-copy]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const text = btn.dataset.copy;
+                navigator.clipboard.writeText(text);
+                btn.classList.add("copied");
+                const label = btn.querySelector("span");
+                if (label && btn.classList.contains("btn-copy-model-id")) {
+                    label.textContent = "Copied!";
+                }
+                setTimeout(() => {
+                    btn.classList.remove("copied");
+                    if (label && btn.classList.contains("btn-copy-model-id")) {
+                        label.textContent = "Copy ID";
+                    }
+                }, 1800);
+            });
+        });
     }
 
     async function loadAccountsStatus() {
@@ -618,7 +1002,7 @@
         try {
             // Build model string with thinking tier if applicable
             let requestModel = state.selectedModel;
-            const reasoningEffort = state.thinkingLevel !== "OFF" ? state.thinkingLevel.toLowerCase() : undefined;
+            const reasoningEffort = state.thinkingLevel !== "OFF" ? state.thinkingLevel.toLowerCase() : "none";
 
             const resp = await fetch("/v1/chat/completions", {
                 method: "POST",
@@ -644,6 +1028,15 @@
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
+            let renderRafId = null;
+            function queueMarkdownUpdate() {
+                if (renderRafId) return;
+                renderRafId = requestAnimationFrame(() => {
+                    renderRafId = null;
+                    markdownBody.innerHTML = renderMarkdown(answerText) + '<span class="typing-cursor"></span>';
+                    scrollToBottom();
+                });
+            }
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -706,7 +1099,7 @@
                                     const remainder = closeParts.slice(1).join("</think>");
                                     if (remainder) {
                                         answerText += remainder;
-                                        markdownBody.innerHTML = renderMarkdown(answerText) + '<span class="typing-cursor"></span>';
+                                        queueMarkdownUpdate();
                                     }
                                 } else {
                                     thinkingText += delta;
@@ -718,7 +1111,7 @@
                                 const clean = delta.replace(/<\/?think>/g, "");
                                 if (clean) {
                                     answerText += clean;
-                                    markdownBody.innerHTML = renderMarkdown(answerText) + '<span class="typing-cursor"></span>';
+                                    queueMarkdownUpdate();
                                 }
                             }
 
@@ -728,6 +1121,10 @@
                 }
             }
 
+            if (renderRafId) {
+                cancelAnimationFrame(renderRafId);
+                renderRafId = null;
+            }
             // Remove typing cursor and render final response
             markdownBody.innerHTML = renderMarkdown(answerText || rawResponse);
             state.messages.push({ role: "assistant", content: rawResponse });
@@ -1203,6 +1600,11 @@
 
         let html = escapeHtml(text);
 
+        // Images: ![alt](url) (supports base64 data URLs and external http/https images)
+        html = html.replace(/!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]+|https?:\/\/[^\s)]+)\)/g, (match, alt, src) => {
+            return `<div class="chat-image-wrapper"><img src="${src}" alt="${alt || 'Image'}" class="chat-generated-image" loading="lazy" style="max-width:100%; border-radius:10px; margin:10px 0; box-shadow:0 4px 16px rgba(0,0,0,0.3); display:block;" /></div>`;
+        });
+
         // Code blocks: ```lang ... ```
         html = html.replace(/```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```/g, (match, lang, code) => {
             const langLabel = lang || "code";
@@ -1276,8 +1678,25 @@
     function openGuide() {
         closeDrawers();
         updateGuideUrls();
+        renderModelDirectory();
         dom.drawerGuide.classList.add("open");
         dom.drawerOverlay.classList.add("visible");
+    }
+
+    function switchGuideTab(paneId) {
+        if (dom.guideTabs) {
+            dom.guideTabs.forEach(t => {
+                t.classList.toggle("active", t.dataset.tab === paneId);
+            });
+        }
+        if (dom.panePresets) dom.panePresets.classList.toggle("active", paneId === "pane-presets");
+        if (dom.paneModels) dom.paneModels.classList.toggle("active", paneId === "pane-models");
+        if (paneId === "pane-models") {
+            renderModelDirectory();
+            if (dom.modelDirSearch) {
+                setTimeout(() => dom.modelDirSearch.focus(), 100);
+            }
+        }
     }
 
     function closeDrawers() {

@@ -42,27 +42,34 @@ const ENDPOINTS = [
     "https://cloudcode-pa.googleapis.com"
 ];
 
+// Fallback list of REAL upstream models (used only when live discovery fails).
+// Friendly aliases (dall-e-3, claude-3-7-sonnet, opus, flash...) are still resolved
+// by resolveModelInfo() but intentionally NOT advertised in /v1/models.
 const DEFAULT_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-2.5-flash-thinking",
     "gemini-3-flash",
     "gemini-3.1-pro-high",
     "gemini-3.5-flash-low",
     "gemini-3.6-flash-high",
     "gemini-3.8-flash-tiered",
-    "claude-3-7-sonnet",
-    "claude-3-5-sonnet",
+    "claude-sonnet-5-5-high",
+    "claude-sonnet-5-5-medium",
+    "claude-sonnet-5-5-low",
+    "claude-opus-5-5-high",
+    "claude-opus-5-5-medium",
+    "claude-opus-5-5-low",
     "claude-sonnet-4-6",
     "claude-opus-4-6-thinking",
     "gemini-3.1-flash-image",
-    "dall-e-3",
     "gpt-oss-120b-medium"
 ];
 
+const MODELS_CACHE_KEY = "discovered_models_v3";
+
 interface ModelResolution {
     upstreamModel: string;
-    thinkingLevel: "LOW" | "MEDIUM" | "HIGH";
+    thinkingLevel: "NONE" | "LOW" | "MEDIUM" | "HIGH";
     isGemini3: boolean;
 }
 
@@ -79,32 +86,80 @@ function resolveModelInfo(model: string, reasoningEffort?: string): ModelResolut
     }
 
     // 2. Extract explicit tier suffix (e.g. -low, -medium, -high)
-    const tierMatch = lower.match(/-(low|medium|high)$/);
-    const explicitTier = tierMatch ? (tierMatch[1].toUpperCase() as "LOW" | "MEDIUM" | "HIGH") : null;
-    let base = explicitTier ? lower.replace(/-(low|medium|high)$/, "") : lower;
+    // IMPORTANT: Do NOT strip suffixes from known models where the tier is part of the official model ID
+    // (e.g. gpt-oss-120b-medium, gemini-3.1-pro-high, gemini-3.5-flash-low, gemini-3.6-flash-high, claude-*-5-5-*).
+    const isKnownExactModel = DEFAULT_MODELS.includes(lower) || (memoryModelsCache?.includes(lower) ?? false);
+    let explicitTier: "LOW" | "MEDIUM" | "HIGH" | null = null;
+    let base = lower;
 
-    // 3. Claude mapping:
-    // If exact or modern version is specified (e.g. claude-sonnet-4-6, claude-opus-4-6-thinking, or future claude-5*), preserve it!
-    // Only map generic aliases like 'opus', 'claude', 'sonnet' or legacy 'claude-3-5-*', 'claude-3-7-*'
-    if (base === "opus" || base === "claude-opus" || /^claude-3.*opus/.test(base)) {
-        base = "claude-opus-4-6-thinking";
-    } else if (base === "claude" || base === "sonnet" || base === "claude-sonnet" || /^claude-3.*sonnet/.test(base)) {
-        base = "claude-sonnet-4-6";
+    const tierMatch = lower.match(/-(low|medium|high)$/);
+    if (tierMatch) {
+        explicitTier = tierMatch[1].toUpperCase() as "LOW" | "MEDIUM" | "HIGH";
+        if (!isKnownExactModel) {
+            base = lower.replace(/-(low|medium|high)$/, "");
+        }
     }
 
-    // 4. Future-proof Gemini mapping (gemini-3.x, 3.9, 4.x etc.)
-    const isModernGemini = /^gemini-[3-9]\./i.test(base);
-    if (isModernGemini && base.includes("flash") && !base.includes("tiered") && !base.includes("lite") && !base.includes("high") && !base.includes("low")) {
+    const effortUpper = reasoningEffort?.toUpperCase();
+    let finalTier: ModelResolution["thinkingLevel"];
+    if (effortUpper === "NONE" || effortUpper === "OFF") {
+        finalTier = "NONE";
+    } else if (explicitTier) {
+        finalTier = explicitTier;
+    } else if (effortUpper === "LOW" || effortUpper === "MEDIUM" || effortUpper === "HIGH") {
+        finalTier = effortUpper;
+    } else {
+        finalTier = "HIGH";
+    }
+
+    // Determine target Claude tier suffix (high, medium, low)
+    const claudeTier = (explicitTier || (effortUpper === "LOW" ? "LOW" : effortUpper === "MEDIUM" ? "MEDIUM" : "HIGH")).toLowerCase();
+
+    // 3. Claude mapping:
+    // Check if the input is already an exact Claude 5.5 variant (e.g. claude-sonnet-5-5-high)
+    const isExactClaude55 = [
+        "claude-sonnet-5-5-high", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low",
+        "claude-opus-5-5-high", "claude-opus-5-5-medium", "claude-opus-5-5-low"
+    ].includes(base);
+
+    if (isExactClaude55) {
+        // If an explicit reasoningEffort overrides the tier, map accordingly
+        if (effortUpper === "LOW" || effortUpper === "MEDIUM" || effortUpper === "HIGH") {
+            const prefix = base.startsWith("claude-opus") ? "claude-opus-5-5" : "claude-sonnet-5-5";
+            base = `${prefix}-${effortUpper.toLowerCase()}`;
+        }
+    } else if (base === "opus" || base === "claude-opus" || /^claude-.*opus/.test(base) || base.includes("opus")) {
+        // Opus aliases: opus, claude-opus, claude-opus-5-5, claude-opus-5.5, opus-5.5, claude-opus-4-6-thinking...
+        base = `claude-opus-5-5-${claudeTier}`;
+    } else if (
+        base === "claude" ||
+        base === "sonnet" ||
+        base === "claude-sonnet" ||
+        base === "sonnet-5.5" ||
+        base === "sonnet-5-5" ||
+        base === "claude-sonnet-5.5" ||
+        base === "claude-sonnet-5-5" ||
+        base === "claude-5.5-sonnet" ||
+        base === "claude-5-5-sonnet" ||
+        base === "claude-5-sonnet" ||
+        base === "claude-sonnet-5" ||
+        base === "claude-sonnet-4-6" ||
+        /^claude-.*sonnet/.test(base) ||
+        base.startsWith("claude")
+    ) {
+        // Sonnet & general Claude aliases: claude-sonnet-5-5, claude-sonnet-5.5, sonnet-5.5, claude-3-7-sonnet, claude, sonnet...
+        base = `claude-sonnet-5-5-${claudeTier}`;
+    }
+
+    // 4. Future-proof Gemini mapping (gemini-3.x, 3.9, 4.x etc. and gemini-3-flash)
+    const isModernGemini = /^gemini-[3-9](\.|\b|-)/i.test(base);
+    if (!isKnownExactModel && isModernGemini && base.includes("flash") && !base.includes("tiered") && !base.includes("lite") && !base.includes("high") && !base.includes("low") && !base.includes("medium")) {
         base = base + "-tiered";
     } else if (base === "flash" || base === "gemini-flash") {
         base = "gemini-3.8-flash-tiered";
     } else if (base === "pro" || base === "gemini-pro") {
         base = "gemini-2.5-pro";
     }
-
-    const effortUpper = reasoningEffort?.toUpperCase();
-    const finalTier: "LOW" | "MEDIUM" | "HIGH" = explicitTier ||
-        (effortUpper === "LOW" || effortUpper === "MEDIUM" || effortUpper === "HIGH" ? effortUpper : "HIGH");
 
     return {
         upstreamModel: base,
@@ -282,9 +337,20 @@ async function getAccessToken(account: RuntimeAccount, env: Env): Promise<string
     if (env.KV) {
         const cached = await env.KV.get(kvKey);
         if (cached) {
-            account.accessToken = cached;
-            account.tokenExpiry = now + 1800000; // 30 min fallback
-            return cached;
+            let token = cached;
+            let exp = now + 300000; // legacy plain-string entry: trust for 5 min only
+            try {
+                const parsed = JSON.parse(cached);
+                if (parsed && typeof parsed.token === "string") {
+                    token = parsed.token;
+                    exp = Number(parsed.exp) || exp;
+                }
+            } catch { /* legacy format */ }
+            if (exp > now + 30000) {
+                account.accessToken = token;
+                account.tokenExpiry = exp;
+                return token;
+            }
         }
     }
 
@@ -315,7 +381,7 @@ async function getAccessToken(account: RuntimeAccount, env: Env): Promise<string
 
             // Save to KV
             if (env.KV) {
-                await env.KV.put(kvKey, data.access_token, { expirationTtl: ttlSeconds });
+                await env.KV.put(kvKey, JSON.stringify({ token: data.access_token, exp: account.tokenExpiry }), { expirationTtl: ttlSeconds });
             }
 
             return data.access_token;
@@ -326,6 +392,14 @@ async function getAccessToken(account: RuntimeAccount, env: Env): Promise<string
     }
 
     throw lastErr;
+}
+
+async function invalidateToken(account: RuntimeAccount, env: Env): Promise<void> {
+    account.accessToken = undefined as any;
+    account.tokenExpiry = 0;
+    if (env.KV) {
+        try { await env.KV.delete(`token:${account.email}`); } catch { /* ignore */ }
+    }
 }
 
 function selectAccount(): RuntimeAccount | null {
@@ -349,13 +423,21 @@ function markRateLimited(account: RuntimeAccount, cooldownMs = 60000): void {
 
 // ========== CHAT COMPLETIONS ==========
 async function handleChatCompletions(request: Request, env: Env): Promise<Response> {
-    const body = await request.json() as any;
+    let body: any;
+    try {
+        body = await request.json();
+    } catch {
+        return errorResponse("Invalid JSON body", 400, "invalid_request_error");
+    }
+    if (!body || typeof body !== "object") {
+        return errorResponse("Request body must be a JSON object", 400, "invalid_request_error");
+    }
     const requestedModel = body.model || "gemini-2.5-flash";
     const modelInfo = resolveModelInfo(requestedModel, body.reasoning_effort);
     const upstreamModel = modelInfo.upstreamModel;
     const isStream = !!body.stream;
 
-    const shouldLog = env.DEBUG_LOG_PAYLOADS !== "false";
+    const shouldLog = env.DEBUG_LOG_PAYLOADS === "true";
     if (shouldLog) {
         console.log(`[REQUEST JSON] Model: ${requestedModel} | Stream: ${isStream}\n` + JSON.stringify(body, null, 2));
     }
@@ -376,7 +458,8 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
             accessToken = await getAccessToken(account, env);
         } catch (e: any) {
             console.error(`Auth failure for account index ${account.index}:`, e.message);
-            markRateLimited(account, 120000);
+            const isRevoked = /invalid_grant/i.test(e?.message || "");
+            markRateLimited(account, isRevoked ? 3600000 : 120000);
             lastError = { status: 401, message: "Upstream authentication failed", type: "authentication_error" };
             continue;
         }
@@ -390,27 +473,33 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
             userAgent: "antigravity",
             requestId: `agent-${crypto.randomUUID()}`
         };
+        const payloadJson = JSON.stringify(wrappedPayload);
 
-        const headers = {
-            "Authorization": `Bearer ${accessToken}`,
+        const buildHeaders = (token: string) => ({
+            "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json",
             "Accept": isStream ? "text/event-stream" : "application/json",
             "User-Agent": "antigravity/2.0.4 windows/amd64",
             "X-Goog-Api-Client": "google-cloud-sdk vscode/1.98.0",
             "Client-Metadata": JSON.stringify({ ideType: "ANTIGRAVITY", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" })
-        };
+        });
 
-        let accountSuccess = false;
+        // Whether this account should be put on cooldown (only for 429 / 5xx / network / auth issues)
+        let shouldCooldown = false;
+        let authRetried = false;
+        let notFoundCount = 0;
+        let last404Message = "";
 
-        for (const endpoint of ENDPOINTS) {
+        for (let epIdx = 0; epIdx < ENDPOINTS.length; epIdx++) {
+            const endpoint = ENDPOINTS[epIdx];
             const action = isStream ? "streamGenerateContent?alt=sse" : "generateContent";
             const url = `${endpoint}/v1internal:${action}`;
 
             try {
                 const response = await fetch(url, {
                     method: "POST",
-                    headers,
-                    body: JSON.stringify(wrappedPayload)
+                    headers: buildHeaders(accessToken),
+                    body: payloadJson
                 });
 
                 if (response.ok) {
@@ -429,42 +518,90 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
                     }
                 }
 
-                // If rate limited or 404, try other endpoint first
-                if (response.status === 429) {
-                    const errText = await response.text();
+                const status = response.status;
+                const errText = await response.text();
+
+                // Expired / revoked access token: invalidate, refresh and retry this endpoint once
+                if (status === 401) {
+                    console.warn(`[Upstream 401 on ${endpoint}]: ${errText.substring(0, 150)}`);
+                    lastError = { status: 401, message: "Upstream authentication failed", type: "authentication_error" };
+                    if (!authRetried) {
+                        authRetried = true;
+                        await invalidateToken(account, env);
+                        try {
+                            accessToken = await getAccessToken(account, env);
+                            epIdx--; // retry same endpoint with fresh token
+                            continue;
+                        } catch (e: any) {
+                            console.error(`Token refresh after 401 failed:`, e.message);
+                        }
+                    }
+                    shouldCooldown = true;
+                    break; // move on to next account
+                }
+
+                // Rate limit: try other endpoint, then cooldown account
+                if (status === 429) {
                     console.warn(`[Upstream 429 on ${endpoint}]: ${errText.substring(0, 150)}`);
                     lastError = { status: 429, message: "Upstream rate limit reached", type: "rate_limit_error" };
-                    continue; // Try next endpoint for this account!
-                }
-
-                if (response.status === 403) {
-                    const errText = await response.text();
-                    console.error(`403 on ${endpoint}: ${errText.substring(0, 200)}`);
-                    lastError = { status: 403, message: "Permission denied on upstream provider", type: "permission_error" };
-                    continue; // Try next endpoint
-                }
-
-                if (response.status === 404) {
+                    shouldCooldown = true;
                     continue;
                 }
 
-                const errText = await response.text();
-                console.error(`Upstream status ${response.status}: ${errText.substring(0, 200)}`);
-                lastError = { status: response.status, message: "Upstream model provider error", type: "api_error" };
+                if (status === 403) {
+                    console.error(`403 on ${endpoint}: ${errText.substring(0, 200)}`);
+                    lastError = { status: 403, message: "Permission denied on upstream provider", type: "permission_error" };
+                    shouldCooldown = true;
+                    continue;
+                }
+
+                if (status === 404) {
+                    notFoundCount++;
+                    last404Message = `Model '${requestedModel}' not found upstream: ${extractUpstreamMessage(errText)}`;
+                    lastError = { status: 404, message: last404Message, type: "invalid_request_error" };
+                    continue;
+                }
+
+                // Other client errors (400, 413, 422...) are caused by the request itself:
+                // return immediately, do not burn the account or retry elsewhere.
+                if (status >= 400 && status < 500) {
+                    console.error(`Upstream client error ${status}: ${errText.substring(0, 300)}`);
+                    return errorResponse(`Upstream rejected request (${status}): ${extractUpstreamMessage(errText)}`, status, "invalid_request_error");
+                }
+
+                console.error(`Upstream status ${status}: ${errText.substring(0, 200)}`);
+                lastError = { status, message: "Upstream model provider error", type: "api_error" };
+                shouldCooldown = true;
                 continue;
 
             } catch (networkError: any) {
                 console.error(`Network error to ${endpoint}:`, networkError.message);
                 lastError = { status: 502, message: "Bad Gateway to upstream service", type: "api_error" };
+                shouldCooldown = true;
                 continue;
             }
         }
 
-        // If all endpoints failed for this account, mark it on cooldown
-        markRateLimited(account, 45000);
+        // Model not found upstream: return 404 immediately, do not burn the account or loop through pool
+        if (notFoundCount > 0) {
+            return errorResponse(last404Message || lastError.message, 404, "invalid_request_error");
+        }
+
+        if (shouldCooldown) {
+            markRateLimited(account, lastError.status === 401 ? 120000 : 45000);
+        }
     }
 
     return errorResponse(lastError.message, lastError.status, lastError.type);
+}
+
+function extractUpstreamMessage(errText: string): string {
+    try {
+        const parsed = JSON.parse(errText);
+        const e = Array.isArray(parsed) ? parsed[0]?.error : parsed?.error;
+        if (e?.message) return String(e.message).substring(0, 300);
+    } catch { /* not JSON */ }
+    return errText.substring(0, 300);
 }
 
 // ========== OPENAI -> GOOGLE TRANSFORMER ==========
@@ -474,6 +611,18 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
     const contents: any[] = [];
 
     const messages = Array.isArray(body.messages) ? body.messages : [];
+    const toolCallIdToName = new Map<string, string>();
+
+    // Pre-scan assistant messages to map tool_call_id to function name
+    for (const msg of messages) {
+        if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+                if (tc.id && tc.function?.name) {
+                    toolCallIdToName.set(tc.id, tc.function.name);
+                }
+            }
+        }
+    }
 
     for (const msg of messages) {
         if (msg.role === "system") {
@@ -486,15 +635,50 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
             continue;
         }
 
+        // Tool output message: OpenAI { role: "tool", tool_call_id, content }
+        // Maps to Google Cloud Code: role "user" with functionResponse part
+        if (msg.role === "tool") {
+            const funcName = toolCallIdToName.get(msg.tool_call_id) || msg.name || "function";
+            let responseContent: any = msg.content;
+            if (typeof msg.content === "string") {
+                try {
+                    responseContent = JSON.parse(msg.content);
+                } catch {
+                    responseContent = msg.content;
+                }
+            }
+            contents.push({
+                role: "user",
+                parts: [{
+                    functionResponse: {
+                        name: funcName,
+                        response: { content: responseContent }
+                    }
+                }]
+            });
+            continue;
+        }
+
         const role = msg.role === "assistant" ? "model" : "user";
         const parts: any[] = [];
 
         if (typeof msg.content === "string") {
-            parts.push({ text: msg.content });
+            let cleanText = msg.content;
+            if (role === "model") {
+                // Strip <think>...</think> from previous assistant turns so model context is not polluted
+                cleanText = cleanText.replace(/<think>[\s\S]*?<\/think>\s*/g, "");
+            }
+            if (cleanText) {
+                parts.push({ text: cleanText });
+            }
         } else if (Array.isArray(msg.content)) {
             for (const item of msg.content) {
                 if (item.type === "text" && item.text) {
-                    parts.push({ text: item.text });
+                    let cleanText = item.text;
+                    if (role === "model") {
+                        cleanText = cleanText.replace(/<think>[\s\S]*?<\/think>\s*/g, "");
+                    }
+                    if (cleanText) parts.push({ text: cleanText });
                 } else if (item.type === "image_url" && item.image_url?.url) {
                     const url = item.image_url.url;
                     if (url.startsWith("data:")) {
@@ -503,17 +687,49 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
                         parts.push({ inlineData: { mimeType, data: base64Data } });
                     } else if (url.startsWith("http://") || url.startsWith("https://")) {
                         try {
-                            const imgResp = await fetch(url);
+                            const imgResp = await fetch(url, { signal: AbortSignal.timeout(10000) });
                             if (imgResp.ok) {
+                                const contentType = imgResp.headers.get("content-type") || "";
+                                if (!contentType.startsWith("image/")) {
+                                    console.warn("Skipping non-image URL:", url, contentType);
+                                    continue;
+                                }
+                                const contentLength = Number(imgResp.headers.get("content-length")) || 0;
+                                if (contentLength > 20 * 1024 * 1024) {
+                                    console.warn("Skipping oversized image:", url, contentLength);
+                                    continue;
+                                }
                                 const arrayBuf = await imgResp.arrayBuffer();
+                                if (arrayBuf.byteLength > 20 * 1024 * 1024) continue;
                                 const base64Data = arrayBufferToBase64(arrayBuf);
-                                const mimeType = imgResp.headers.get("content-type") || "image/jpeg";
+                                const mimeType = contentType.split(";")[0] || "image/jpeg";
                                 parts.push({ inlineData: { mimeType, data: base64Data } });
                             }
                         } catch (e: any) {
                             console.warn("Failed to download external image:", url, e.message);
                         }
                     }
+                }
+            }
+        }
+
+        // Assistant function calls (tool_calls)
+        if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+            for (const tc of msg.tool_calls) {
+                if (tc.type === "function" && tc.function) {
+                    let args = {};
+                    if (typeof tc.function.arguments === "string") {
+                        try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
+                    } else if (typeof tc.function.arguments === "object") {
+                        args = tc.function.arguments || {};
+                    }
+                    parts.push({
+                        thoughtSignature: SKIP_THOUGHT_SIGNATURE,
+                        functionCall: {
+                            name: tc.function.name,
+                            args
+                        }
+                    });
                 }
             }
         }
@@ -527,7 +743,10 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
             }
         }
 
-        contents.push({ role, parts });
+        // Prevent empty parts (which cause Google to return 400 INVALID_ARGUMENT)
+        if (parts.length > 0) {
+            contents.push({ role, parts });
+        }
     }
 
     const genConfig: any = {
@@ -542,11 +761,23 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
 
     // Enable thinking mode if requested
     const isThinkingModel = modelInfo.isGemini3 || modelName.includes("thinking") || modelName.includes("gemini-2.5") || modelName.includes("claude");
-    if (isThinkingModel) {
+    if (isThinkingModel && modelInfo.thinkingLevel === "NONE") {
+        // Thinking OFF: Gemini 3 and Claude cannot fully disable thinking -> minimal level, hidden thoughts.
+        // Others (Gemini 2.5): omit thinkingConfig completely (Google Cloud Code rejects thinkingBudget: 0 with 400).
+        if (modelInfo.isGemini3) {
+            genConfig.thinkingConfig = { includeThoughts: false, thinkingLevel: "LOW" };
+        } else if (modelName.includes("claude")) {
+            genConfig.thinkingConfig = { includeThoughts: false };
+        }
+    } else if (isThinkingModel) {
         if (modelInfo.isGemini3) {
             genConfig.thinkingConfig = {
                 includeThoughts: true,
                 thinkingLevel: modelInfo.thinkingLevel // LOW | MEDIUM | HIGH
+            };
+        } else if (modelName.includes("claude")) {
+            genConfig.thinkingConfig = {
+                includeThoughts: true
             };
         } else {
             const budget = modelInfo.thinkingLevel === "LOW" ? 4096 : modelInfo.thinkingLevel === "MEDIUM" ? 12288 : 24576;
@@ -584,7 +815,7 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
         payload.systemInstruction = systemInstruction;
     }
 
-    // Google Search Grounding for Gemini models
+    // Grounding (Google Search)
     const enableGrounding = (
         body.grounding === true ||
         body.web_search === true ||
@@ -596,8 +827,46 @@ async function transformOpenAiRequest(body: any, modelInfo: ModelResolution): Pr
         ))
     );
 
+    const toolsPayload: any[] = [];
     if (enableGrounding && !modelName.toLowerCase().includes("claude")) {
-        payload.tools = [{ googleSearch: {} }];
+        toolsPayload.push({ googleSearch: {} });
+    }
+
+    // Function Calling / Tools declarations
+    if (Array.isArray(body.tools) && body.tools.length > 0) {
+        const functionDeclarations = body.tools
+            .filter((t: any) => t.type === "function" && t.function?.name)
+            .map((t: any) => ({
+                name: t.function.name,
+                description: t.function.description || "",
+                parameters: t.function.parameters || { type: "object", properties: {} }
+            }));
+
+        if (functionDeclarations.length > 0) {
+            toolsPayload.push({ functionDeclarations });
+        }
+    }
+
+    if (toolsPayload.length > 0) {
+        payload.tools = toolsPayload;
+    }
+
+    // Tool choice mapping
+    if (body.tool_choice) {
+        if (body.tool_choice === "auto") {
+            payload.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
+        } else if (body.tool_choice === "none") {
+            payload.toolConfig = { functionCallingConfig: { mode: "NONE" } };
+        } else if (body.tool_choice === "required") {
+            payload.toolConfig = { functionCallingConfig: { mode: "ANY" } };
+        } else if (typeof body.tool_choice === "object" && body.tool_choice.function?.name) {
+            payload.toolConfig = {
+                functionCallingConfig: {
+                    mode: "ANY",
+                    allowedFunctionNames: [body.tool_choice.function.name]
+                }
+            };
+        }
     }
 
     return payload;
@@ -610,10 +879,9 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
 
     let buffer = "";
     let isFirstChunk = true;
-    let hasSentThinkOpen = false;
-    let hasSentThinkClose = false;
     let accumulatedThought = "";
     let accumulatedContent = "";
+    const accumulatedToolCalls: any[] = [];
 
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -632,9 +900,6 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
             if (buffer.trim()) {
                 processLine(buffer.trim(), controller);
             }
-            if (hasSentThinkOpen && !hasSentThinkClose) {
-                sendChunk(controller, "\n</think>\n", null);
-            }
             if (shouldLog) {
                 console.log(`[RESPONSE STREAM COMPLETE] Model: ${modelName}\n` + JSON.stringify({
                     id: completionId,
@@ -644,7 +909,9 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
                         index: 0,
                         message: {
                             role: "assistant",
-                            content: (accumulatedThought ? `<think>\n${accumulatedThought}\n</think>\n` : "") + accumulatedContent
+                            content: accumulatedContent || null,
+                            ...(accumulatedThought ? { reasoning_content: accumulatedThought } : {}),
+                            ...(accumulatedToolCalls.length ? { tool_calls: accumulatedToolCalls } : {})
                         }
                     }]
                 }, null, 2));
@@ -669,6 +936,7 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
             const parts = cand.content?.parts || [];
             let contentText = "";
             let thinkText = "";
+            const streamToolCalls: any[] = [];
 
             for (const part of parts) {
                 if (part.thought === true) {
@@ -677,16 +945,31 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
                     contentText += part.text;
                 } else if (part.inlineData) {
                     contentText += `\n![Generated Image](data:${part.inlineData.mimeType || "image/jpeg"};base64,${part.inlineData.data})\n`;
+                } else if (part.functionCall) {
+                    const tc = {
+                        index: accumulatedToolCalls.length + streamToolCalls.length,
+                        id: part.functionCall.id || `call_${crypto.randomUUID()}`,
+                        type: "function",
+                        function: {
+                            name: part.functionCall.name,
+                            arguments: typeof part.functionCall.args === "string" ? part.functionCall.args : JSON.stringify(part.functionCall.args || {})
+                        }
+                    };
+                    streamToolCalls.push(tc);
                 }
             }
 
+            // Stream reasoning/thought chunk
             if (thinkText) {
                 accumulatedThought += thinkText;
-                if (!hasSentThinkOpen) {
-                    sendChunk(controller, "<think>\n", null);
-                    hasSentThinkOpen = true;
-                }
-                sendChunk(controller, thinkText, null);
+                sendChunk(controller, { reasoning_content: thinkText }, null);
+            }
+
+            // Stream tool calls chunk
+            if (streamToolCalls.length > 0) {
+                accumulatedToolCalls.push(...streamToolCalls);
+                sendChunk(controller, { tool_calls: streamToolCalls }, "tool_calls");
+                return;
             }
 
             const finishReason = cand.finishReason === "STOP" ? "stop" :
@@ -695,28 +978,26 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
 
             if (contentText) {
                 accumulatedContent += contentText;
-                if (hasSentThinkOpen && !hasSentThinkClose) {
-                    sendChunk(controller, "\n</think>\n", null);
-                    hasSentThinkClose = true;
-                }
-                sendChunk(controller, contentText, finishReason);
+                sendChunk(controller, { content: contentText }, finishReason);
             } else if (finishReason) {
-                if (hasSentThinkOpen && !hasSentThinkClose) {
-                    sendChunk(controller, "\n</think>\n", null);
-                    hasSentThinkClose = true;
-                }
-                sendChunk(controller, "", finishReason);
+                sendChunk(controller, {}, finishReason);
             }
         } catch {}
     }
 
-    function sendChunk(controller: TransformStreamDefaultController, text: string, finishReason: string | null): void {
+    function sendChunk(
+        controller: TransformStreamDefaultController,
+        deltaFields: { content?: string; reasoning_content?: string; tool_calls?: any[] },
+        finishReason: string | null
+    ): void {
         const delta: any = {};
         if (isFirstChunk) {
             delta.role = "assistant";
             isFirstChunk = false;
         }
-        if (text) delta.content = text;
+        if (deltaFields.content !== undefined) delta.content = deltaFields.content;
+        if (deltaFields.reasoning_content !== undefined) delta.reasoning_content = deltaFields.reasoning_content;
+        if (deltaFields.tool_calls !== undefined) delta.tool_calls = deltaFields.tool_calls;
 
         const chunk = {
             id: completionId,
@@ -745,8 +1026,8 @@ function streamToOpenAi(response: Response, modelName: string, shouldLog = true)
 
 // ========== UNARY RESPONSE ==========
 function mapUnaryResponse(data: any, modelName: string): any {
-    let content = "";
     let finishReason = "stop";
+    const message: any = { role: "assistant", content: "" };
 
     const cand = data.response?.candidates?.[0];
     if (cand) {
@@ -754,9 +1035,30 @@ function mapUnaryResponse(data: any, modelName: string): any {
         const thoughtParts = parts.filter((p: any) => p.text && p.thought === true).map((p: any) => p.text).join("");
         const textParts = parts.filter((p: any) => p.text && !p.thought).map((p: any) => p.text).join("");
         const imageParts = parts.filter((p: any) => p.inlineData).map((p: any) => `\n![Generated Image](data:${p.inlineData.mimeType || "image/jpeg"};base64,${p.inlineData.data})\n`).join("");
+        const functionCalls = parts.filter((p: any) => p.functionCall).map((p: any) => ({
+            id: p.functionCall.id || `call_${crypto.randomUUID()}`,
+            type: "function",
+            function: {
+                name: p.functionCall.name,
+                arguments: typeof p.functionCall.args === "string" ? p.functionCall.args : JSON.stringify(p.functionCall.args || {})
+            }
+        }));
 
-        content = (thoughtParts ? `<think>\n${thoughtParts}\n</think>\n${textParts}` : textParts) + imageParts;
+        if (thoughtParts) {
+            message.reasoning_content = thoughtParts;
+        }
+
+        const answerText = textParts + imageParts;
+        if (functionCalls.length > 0) {
+            message.tool_calls = functionCalls;
+            message.content = answerText ? answerText : null;
+            finishReason = "tool_calls";
+        } else {
+            message.content = answerText;
+        }
+
         if (cand.finishReason === "MAX_TOKENS") finishReason = "length";
+        else if (cand.finishReason === "SAFETY") finishReason = "content_filter";
     }
 
     const usage = {
@@ -772,7 +1074,7 @@ function mapUnaryResponse(data: any, modelName: string): any {
         model: modelName,
         choices: [{
             index: 0,
-            message: { role: "assistant", content },
+            message,
             finish_reason: finishReason
         }],
         usage
@@ -875,7 +1177,7 @@ async function getDiscoveredModels(env: Env): Promise<string[]> {
     }
 
     if (env.KV) {
-        const cached = await env.KV.get("discovered_models", "json") as string[] | null;
+        const cached = await env.KV.get(MODELS_CACHE_KEY, "json") as string[] | null;
         if (cached && Array.isArray(cached) && cached.length > 0) {
             memoryModelsCache = cached;
             lastModelsDiscovery = now;
@@ -896,25 +1198,29 @@ async function getDiscoveredModels(env: Env): Promise<string[]> {
             "Client-Metadata": JSON.stringify({ ideType: "ANTIGRAVITY", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" })
         };
 
-        const resp = await fetch("https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ project: account.projectId })
-        });
+        for (const endpoint of ENDPOINTS) {
+            try {
+                const resp = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ project: account.projectId || DEFAULT_PROJECT_ID })
+                });
 
-        if (resp.ok) {
-            const data = await resp.json() as any;
-            const liveModels = Object.keys(data.models || {});
-            if (liveModels.length > 0) {
-                // Combine live models from Google with friendly aliases (dall-e-3, etc.)
-                const combined = Array.from(new Set([...liveModels, ...DEFAULT_MODELS]));
-                memoryModelsCache = combined;
-                lastModelsDiscovery = now;
-                if (env.KV) {
-                    await env.KV.put("discovered_models", JSON.stringify(combined), { expirationTtl: 86400 });
+                if (resp.ok) {
+                    const data = await resp.json() as any;
+                    const liveModels = Object.keys(data.models || {});
+                    if (liveModels.length > 0) {
+                        // Merge live upstream models with DEFAULT_MODELS so known models (Claude 5.5, Gemini 3.8) are always guaranteed
+                        const combined = Array.from(new Set([...DEFAULT_MODELS, ...liveModels]));
+                        memoryModelsCache = combined;
+                        lastModelsDiscovery = now;
+                        if (env.KV) {
+                            await env.KV.put(MODELS_CACHE_KEY, JSON.stringify(combined), { expirationTtl: 86400 });
+                        }
+                        return combined;
+                    }
                 }
-                return combined;
-            }
+            } catch {}
         }
     } catch (e: any) {
         console.warn("Dynamic model discovery failed, using defaults:", e.message);
@@ -970,3 +1276,21 @@ function errorResponse(message: string, status = 500, type = "api_error"): Respo
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" }
     });
 }
+
+// ========== EXPORTS FOR TESTING ==========
+export {
+    resolveModelInfo,
+    transformOpenAiRequest,
+    mapUnaryResponse,
+    streamToOpenAi,
+    extractUpstreamMessage,
+    DEFAULT_MODELS,
+    MODELS_CACHE_KEY,
+    getDiscoveredModels,
+    getAccessToken,
+    invalidateToken,
+    accountsPool,
+    selectAccount,
+    markRateLimited
+};
+

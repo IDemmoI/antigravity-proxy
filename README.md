@@ -85,7 +85,7 @@ npm run deploy
   * **Provider / Format**: OpenAI Compatible
   * **Base URL**: `https://<your-worker-name>.workers.dev/v1`
   * **API Key**: `<Your Master API Key>`
-  * **Model**: `gemini-3.8-flash-tiered` or `claude-sonnet-4-6`
+  * **Model**: `gemini-3.8-flash-tiered` or `claude-sonnet-5-5-high`
 
 ---
 
@@ -120,7 +120,7 @@ This project bridges external OpenAI-compatible clients (such as Cursor, Cline, 
                                        v
 +--------------------------------------------------------------------------------+
 |                        Google Cloud Code Infrastructure                        |
-|             (Gemini 2.5/3.x, Claude Sonnet 4-6, Claude Opus, Vision)           |
+|             (Gemini 2.5/3.x, Claude Sonnet 5.5, Claude Opus 5.5, Vision)     |
 +--------------------------------------------------------------------------------+
 ```
 
@@ -138,7 +138,7 @@ This project bridges external OpenAI-compatible clients (such as Cursor, Cline, 
    * Thought signature bypass injection (`skip_thought_signature_validator`) to prevent Claude multi-turn conversation validation failures.
 4. **Dynamic Model Discovery**:
    * Queries Google Cloud Code endpoints dynamically via `POST /v1internal:fetchAvailableModels`.
-   * Automatically discovers and serves newly deployed models (e.g., `gemini-3.8-flash-tiered`, `gemini-3.9-flash-tiered`, `claude-sonnet-4-6`) without manual updates or redeployments.
+   * Automatically discovers and serves newly deployed models (e.g., `gemini-3.8-flash-tiered`, `gemini-3.9-flash-tiered`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`) without manual updates or redeployments.
 5. **Decoupled Frontend**:
    * Modern, responsive web application located in `./public`.
    * Zero server-side templating or inline HTML strings in the Worker codebase.
@@ -387,7 +387,7 @@ Configure within IDE settings:
 * **API Provider**: `OpenAI Compatible`
 * **Base URL**: `https://<your-worker-subdomain>.workers.dev/v1`
 * **API Key**: `<YOUR_PROXY_API_KEY>`
-* **Model ID**: `gemini-3.8-flash-tiered` or `claude-sonnet-4-6`
+* **Model ID**: `gemini-3.8-flash-tiered` or `claude-sonnet-5-5-high` (supports aliases `claude`, `sonnet`, `claude-sonnet-5.5`, `opus`, etc.)
 
 ### 2. NextChat / LibreChat / OpenWebUI
 * **API Host / Endpoint**: `https://<your-worker-subdomain>.workers.dev/v1`

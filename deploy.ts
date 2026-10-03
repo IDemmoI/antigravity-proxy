@@ -5,6 +5,7 @@ import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 import readline from "node:readline/promises";
 
 const ROOT_DIR = process.cwd();
@@ -68,7 +69,7 @@ async function main() {
     let customKey = "";
     for (const arg of process.argv.slice(2)) {
         if (arg.startsWith("--key=")) {
-            customKey = arg.split("=")[1]?.trim();
+            customKey = arg.slice("--key=".length).trim();
         } else if (!arg.startsWith("-")) {
             customKey = arg.trim();
         }
@@ -129,7 +130,7 @@ async function main() {
     // --- STEP 4: Setup Cloudflare KV Namespace ---
     console.log("\n[4/6] Checking Cloudflare KV Cache Namespace...");
     let wranglerToml = fs.readFileSync(WRANGLER_FILE, "utf-8");
-    if (!wranglerToml.includes('binding = "KV"')) {
+    if (!/^\s*\[\[kv_namespaces\]\]/m.test(wranglerToml)) {
         console.log("   Creating KV Namespace for token and model caching...");
         try {
             const kvOutput = execSync('npx wrangler kv namespace create "KV"', { encoding: "utf-8" });
@@ -150,24 +151,28 @@ async function main() {
 
     // --- STEP 5: Bulk Upload Secrets to Cloudflare ---
     console.log("\n[5/6] Uploading secrets to Cloudflare Workers...");
-    const tempSecretsPath = path.join(ROOT_DIR, `.secrets-${Date.now()}.tmp.json`);
+    const tempSecretsPath = path.join(os.tmpdir(), `.secrets-${crypto.randomBytes(8).toString("hex")}.tmp.json`);
+    let secretsFailed = false;
     try {
         const secretsPayload = {
             PROXY_API_KEY: masterApiKey,
             ACCOUNTS: JSON.stringify(accounts)
         };
-        fs.writeFileSync(tempSecretsPath, JSON.stringify(secretsPayload));
+        fs.writeFileSync(tempSecretsPath, JSON.stringify(secretsPayload), { mode: 0o600 });
 
         execSync(`npx wrangler secret bulk "${tempSecretsPath}"`, { stdio: "inherit" });
         console.log("   [OK] Secrets (PROXY_API_KEY and ACCOUNTS) uploaded successfully.");
     } catch (secErr: any) {
         console.error("   Error: Failed to upload secrets:", secErr.message);
-        process.exit(1);
+        secretsFailed = true;
     } finally {
-        if (fs.existsSync(tempSecretsPath)) {
-            fs.unlinkSync(tempSecretsPath);
+        try {
+            if (fs.existsSync(tempSecretsPath)) fs.unlinkSync(tempSecretsPath);
+        } catch (rmErr: any) {
+            console.warn(`   Warning: could not remove temp secrets file ${tempSecretsPath}: ${rmErr.message}`);
         }
     }
+    if (secretsFailed) process.exit(1);
 
     // --- STEP 6: Deploy Worker and Static Assets ---
     console.log("\n[6/6] Deploying Worker and Static Assets to Cloudflare...");
@@ -210,7 +215,7 @@ async function main() {
     console.log(`  Provider: OpenAI Compatible`);
     console.log(`  Base URL: ${workerUrl}/v1`);
     console.log(`  API Key:  ${masterApiKey}`);
-    console.log(`  Model:    gemini-3.8-flash-tiered  OR  claude-sonnet-4-6\n`);
+    console.log(`  Model:    gemini-3.8-flash-tiered  OR  claude-sonnet-5-5-high\n`);
 
     console.log("NextChat / LibreChat / OpenWebUI:");
     console.log(`  API Endpoint: ${workerUrl}/v1`);

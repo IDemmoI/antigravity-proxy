@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "login": "node --experimental-strip-types login.ts",
-    "test": "node --experimental-strip-types test-proxy.ts",
+    "test:unit": "node --experimental-strip-types test-unit.ts",
+    "test:live": "node --experimental-strip-types test-proxy.ts",
+    "test": "node --experimental-strip-types test-unit.ts && node --experimental-strip-types test-proxy.ts",
     "dev": "wrangler dev",
     "deploy": "node --experimental-strip-types deploy.ts"
   },

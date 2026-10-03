@@ -123,6 +123,12 @@
                         <select id="select-model" class="custom-select">
                             <option value="gemini-2.5-flash">Loading models...</option>
                         </select>
+                        <button type="button" class="btn-copy-active-model" id="btn-copy-active-model" title="Copy active Model ID to clipboard">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
@@ -192,7 +198,7 @@
                         </svg>
                     </div>
                     <h2>Welcome to Antigravity Proxy</h2>
-                    <p>High-performance proxy with direct access to Google Gemini 3+, Claude Sonnet 4-6, Claude Opus, and real-time reasoning with deep thinking.</p>
+                    <p>High-performance proxy with direct access to Claude Sonnet 5.5, Claude Opus 5.5, Google Gemini 3+, and real-time reasoning with deep thinking.</p>
 
                     <div class="prompt-chips">
                         <button class="prompt-chip" data-prompt="Explain quantum entanglement with deep reasoning step by step.">
@@ -362,7 +368,7 @@
         </aside>
 
         <!-- Slide-over Drawer: API Guide -->
-        <aside class="drawer" id="drawer-guide">
+        <aside class="drawer drawer-wide" id="drawer-guide">
             <div class="drawer-header">
                 <div class="drawer-title">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -374,45 +380,107 @@
                 <button class="btn-icon btn-sm" id="btn-close-guide" title="Close">×</button>
             </div>
 
+            <!-- Guide Tabs Navigation -->
+            <div class="guide-nav-bar">
+                <button type="button" class="guide-tab-btn active" data-tab="presets">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    Quick Setup
+                </button>
+                <button type="button" class="guide-tab-btn" data-tab="models">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                    Model IDs Directory
+                    <span class="badge-count" id="guide-models-count">0</span>
+                </button>
+            </div>
+
             <div class="drawer-content">
-                <p class="text-secondary mb-3">The proxy is 100% compliant with the <strong>OpenAI API specification</strong>. Use these parameters in your favorite tools:</p>
+                <!-- TAB 1: Quick Setup & Presets -->
+                <div class="guide-tab-pane active" id="pane-presets">
+                    <p class="text-secondary mb-3">The proxy is 100% compliant with the <strong>OpenAI API specification</strong>. Use these parameters in your favorite tools:</p>
 
-                <div class="guide-item">
-                    <label>Base URL:</label>
-                    <div class="copy-input-row">
-                        <input type="text" id="guide-base-url" readonly>
-                        <button class="btn btn-secondary btn-sm btn-copy" data-target="guide-base-url">Copy</button>
+                    <div class="guide-item">
+                        <label>Base URL:</label>
+                        <div class="copy-input-row">
+                            <input type="text" id="guide-base-url" readonly>
+                            <button class="btn btn-secondary btn-sm btn-copy" data-target="guide-base-url">Copy</button>
+                        </div>
+                    </div>
+
+                    <div class="guide-item">
+                        <label>API Key:</label>
+                        <div class="copy-input-row">
+                            <input type="text" id="guide-api-key" readonly>
+                            <button class="btn btn-secondary btn-sm btn-copy" data-target="guide-api-key">Copy</button>
+                        </div>
+                    </div>
+
+                    <div class="guide-item">
+                        <label>cURL Example:</label>
+                        <div class="code-box-wrapper">
+                            <pre><code id="guide-curl-snippet"></code></pre>
+                            <button class="btn btn-secondary btn-xs btn-copy-code" data-target="guide-curl-snippet">Copy cURL</button>
+                        </div>
+                    </div>
+
+                    <div class="client-presets">
+                        <div class="section-title-row">
+                            <h4>Quick Setup Presets:</h4>
+                            <button class="btn btn-ghost btn-xs text-accent" id="btn-switch-to-models-tab">View All Models &rarr;</button>
+                        </div>
+                        <div class="preset-card">
+                            <div class="preset-header">
+                                <strong>Cline / Cursor / Roo-Code / Windsurf</strong>
+                                <span class="tag-pill tag-pill-accent">Recommended</span>
+                            </div>
+                            <div class="preset-grid">
+                                <div>Provider: <code>OpenAI Compatible</code></div>
+                                <div>Base URL: <code class="dynamic-url"></code></div>
+                                <div>Model ID: <code class="code-highlight">claude-sonnet-5-5-high</code> <span class="text-muted">or</span> <code class="code-highlight">gemini-3.8-flash-tiered</code></div>
+                            </div>
+                        </div>
+                        <div class="preset-card">
+                            <div class="preset-header">
+                                <strong>NextChat / LibreChat / OpenWebUI</strong>
+                            </div>
+                            <div class="preset-grid">
+                                <div>API Endpoint: <code class="dynamic-url"></code></div>
+                                <div>Models: <code>claude-sonnet-5-5-high, gemini-3.8-flash-tiered, gemini-3.1-flash-image</code></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="guide-item">
-                    <label>API Key:</label>
-                    <div class="copy-input-row">
-                        <input type="text" id="guide-api-key" readonly>
-                        <button class="btn btn-secondary btn-sm btn-copy" data-target="guide-api-key">Copy</button>
+                <!-- TAB 2: Model IDs Full Directory -->
+                <div class="guide-tab-pane" id="pane-models" style="display: none;">
+                    <div class="model-dir-controls">
+                        <div class="model-dir-search-wrap">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="model-dir-search" placeholder="Search models by name, alias, or tier (e.g. sonnet, 5.5, flash, high)...">
+                            <button type="button" class="btn-clear-search" id="btn-clear-model-search" style="display: none;">×</button>
+                        </div>
+                        
+                        <div class="model-dir-filters" id="model-dir-filters">
+                            <button type="button" class="filter-chip active" data-filter="all">All Models</button>
+                            <button type="button" class="filter-chip" data-filter="claude">Claude 5.5</button>
+                            <button type="button" class="filter-chip" data-filter="gemini3">Gemini 3.x Flash</button>
+                            <button type="button" class="filter-chip" data-filter="gemini25">Gemini 2.5</button>
+                            <button type="button" class="filter-chip" data-filter="image">Vision & Image</button>
+                            <button type="button" class="filter-chip" data-filter="oss">Open Source</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="guide-item">
-                    <label>cURL Example:</label>
-                    <div class="code-box-wrapper">
-                        <pre><code id="guide-curl-snippet"></code></pre>
-                        <button class="btn btn-secondary btn-xs btn-copy-code" data-target="guide-curl-snippet">Copy cURL</button>
-                    </div>
-                </div>
-
-                <div class="client-presets">
-                    <h4>Quick Setup Presets:</h4>
-                    <div class="preset-card">
-                        <strong>Cline / Cursor / Roo-Code:</strong>
-                        <p>Provider: <code>OpenAI Compatible</code></p>
-                        <p>Base URL: <code class="dynamic-url"></code></p>
-                        <p>Model ID: <code>claude-sonnet-4-6</code> or <code>gemini-3.8-flash-tiered</code></p>
-                    </div>
-                    <div class="preset-card">
-                        <strong>NextChat / LibreChat / OpenWebUI:</strong>
-                        <p>API Endpoint: <code class="dynamic-url"></code></p>
-                        <p>Models: Any Gemini 3.x, Claude, and <code>dall-e-3</code></p>
+                    <div class="model-dir-list" id="model-dir-list">
+                        <!-- Dynamically populated by app.js -->
                     </div>
                 </div>
             </div>
